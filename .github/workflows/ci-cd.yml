@@ -1,0 +1,35 @@
+name: CI-CD
+on:
+  push: {branches: [main]}
+  pull_request:
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20}
+      - run: npm install
+      - run: npm run build
+      - name: Backend smoke test
+        run: |
+          DB_FILE=/tmp/ci.db node server/server.js &
+          sleep 4
+          curl -sf localhost:8787/api/health
+          curl -sf -X POST localhost:8787/api/graph/run -H 'content-type: application/json' -d '{"email":"ci@test.com","tasks":[{"type":"fee","title":"Semester fee","status":"done","values":{"Amount":"42500"},"due":"2026-10-01"}]}'
+          curl -sf localhost:8787/api/traces | grep validate_guardrails
+  deploy-vercel:
+    needs: build-test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 20}
+      - run: npm install --global vercel@latest
+      - run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+      - run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
